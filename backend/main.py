@@ -9,6 +9,7 @@ from fastapi.responses import JSONResponse
 from pymongo import MongoClient
 from pymongo.errors import PyMongoError
 
+from app.reasoning.agent import ReasoningAgent
 from app.services.knowledge_engine import KnowledgeAgent, KnowledgeBaseInputError
 from app.services.pdf_parser import EmptyPDFError, PDFParser, PDFParsingError, PasswordProtectedPDFError
 
@@ -27,6 +28,7 @@ MAX_UPLOAD_SIZE = 20 * 1024 * 1024
 ALLOWED_PDF_MIME_TYPES = {'application/pdf', 'application/x-pdf'}
 pdf_parser = PDFParser()
 knowledge_agent = KnowledgeAgent()
+reasoning_agent = ReasoningAgent()
 
 app.add_middleware(
     CORSMiddleware,
@@ -171,6 +173,37 @@ def query_knowledge_base(query: dict) -> dict:
         return knowledge_agent.query_fact(predicate, arguments, supplied_knowledge_base)
     except LookupError:
         raise HTTPException(status_code=404, detail='No knowledge base is available. Generate one first.') from None
+
+
+@app.get('/api/reasoning/rules')
+def list_reasoning_rules() -> dict:
+    """Return the controlled Module 4 rule base for transparent UI display."""
+    return {'rules': ReasoningAgent.rules()}
+
+
+@app.post('/api/reasoning/forward')
+def run_forward_reasoning(request: dict) -> dict:
+    """Derive every conclusion supported by the supplied Module 3 knowledge base."""
+    knowledge_base = request.get('knowledge_base')
+    if not isinstance(knowledge_base, dict):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='A Module 3 knowledge_base object is required.')
+    try:
+        return reasoning_agent.forward_reason(knowledge_base)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from None
+
+
+@app.post('/api/reasoning/backward')
+def run_backward_reasoning(request: dict) -> dict:
+    """Attempt to establish one goal from the supplied Module 3 knowledge base and rule base."""
+    knowledge_base = request.get('knowledge_base')
+    goal = request.get('goal')
+    if not isinstance(knowledge_base, dict) or not isinstance(goal, dict):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='A Module 3 knowledge_base and a goal object are required.')
+    try:
+        return reasoning_agent.backward_reason(goal, knowledge_base)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from None
 
 
 @app.get('/health/database')

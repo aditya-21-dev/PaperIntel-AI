@@ -1,8 +1,8 @@
-# PaperIntel AI — Module 3 syllabus mapping
+# PaperIntel AI — Modules 3 and 4 syllabus mapping
 
-Module 3 implements deterministic knowledge representation over the structured document produced by Module 2. It does not parse the PDF again and does not evaluate paper quality.
+Module 3 implements deterministic knowledge representation over the structured document produced by Module 2. Module 4 consumes only that structured knowledge base for rule-based reasoning; it does not parse the PDF again, duplicate knowledge engineering, or evaluate paper quality.
 
-## Implemented syllabus concepts
+## Module 3: implemented syllabus concepts
 
 | Syllabus concept | Module 3 implementation |
 | --- | --- |
@@ -14,17 +14,29 @@ Module 3 implements deterministic knowledge representation over the structured d
 | First-Order Logic Representation | Relationships use subject-predicate-object triples and a readable form such as `HasSection(paper_001, section_001)`. |
 | Agents based on Propositional Logic | The query endpoint performs deterministic exact lookup of stored propositional facts. |
 
+## Module 4: implemented syllabus concepts
+
+| Syllabus concept | Module 4 implementation |
+| --- | --- |
+| Knowledge-Based Agents | `ReasoningAgent` perceives a validated Module 3 knowledge base, loads its facts, applies rules, answers goals, and returns explanations. |
+| Propositional Logic reasoning | Facts preserve explicit Boolean values. The engine distinguishes known true, known false, and unknown facts. |
+| Forward Chaining | A generic fixed-point engine applies the data-defined rule base until no new conclusions can be derived or a safety limit is reached. |
+| Backward Chaining | A separate goal-driven engine recursively checks rules and premises for a requested conclusion. |
+| Rule-Based Inference | Rules contain identifiers, premises, conclusions, priorities, explanations, and source-module metadata; inference logic does not special-case paper rules. |
+| Explainable Knowledge-Based Reasoning | Forward rule firings and backward proof attempts retain rule IDs, supporting facts, missing facts, known false facts, and human-readable explanations. |
+
+Module 4’s only reasoning input is the Module 3 knowledge base. Derived facts are returned separately from the source knowledge base so later modules can consume both without PDF reparsing.
+
 ## Deliberately not implemented yet
 
 The following concepts are reserved for later modules and are **not** claimed as implemented here:
 
-- Forward Chaining
-- Backward Chaining
 - Resolution
 - Model Checking
 - Heuristic Search
 - Local Search
 - Constraint Satisfaction Problems (CSP)
 - Game Playing
+- Alpha-Beta pruning
 
-Module 3 also contains no LLM integration, machine learning, scoring, compliance assessment, citation-quality assessment, or recommendation engine.
+Modules 3 and 4 also contain no LLM integration, machine learning, scoring, compliance assessment, citation-quality assessment, or recommendation engine.

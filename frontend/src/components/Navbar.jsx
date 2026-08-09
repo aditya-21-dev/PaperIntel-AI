@@ -8,6 +8,7 @@ const navigationLinks = [
   { to: '/analyze', label: 'Analyze Paper' },
   { to: '/dashboard', label: 'Dashboard' },
   { to: '/knowledge-base', label: 'Knowledge Base' },
+  { to: '/reasoning', label: 'Reasoning' },
   { to: '/history', label: 'History' },
   { to: '/about', label: 'About' },
 ]

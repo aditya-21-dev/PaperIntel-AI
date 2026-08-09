@@ -53,6 +53,11 @@ export default function KnowledgeBasePage() {
       const response = await generateKnowledgeBase(structuredDocument)
       setKnowledgeBase(response.knowledge_base)
       setValidation(response.validation)
+      try {
+        sessionStorage.setItem('paperintel.knowledgeBase', JSON.stringify(response.knowledge_base))
+      } catch {
+        // Reasoning remains available in the current page session if storage is unavailable.
+      }
       setStatus('ready')
     } catch (requestError) {
       setStatus('error')
@@ -98,7 +103,7 @@ export default function KnowledgeBasePage() {
         </section>
       )}
 
-      {knowledgeBase && <KnowledgeBaseView knowledgeBase={knowledgeBase} activeTab={activeTab} setActiveTab={setActiveTab} selectedPredicate={selectedPredicate} setSelectedPredicate={setSelectedPredicate} queryResult={queryResult} runFactQuery={runFactQuery} counts={counts} />}
+      {knowledgeBase && <><div className="mt-6 flex justify-end"><Link to="/reasoning" className="secondary-button"><Icon name="brain" className="h-4 w-4" /> Open reasoning engine</Link></div><KnowledgeBaseView knowledgeBase={knowledgeBase} activeTab={activeTab} setActiveTab={setActiveTab} selectedPredicate={selectedPredicate} setSelectedPredicate={setSelectedPredicate} queryResult={queryResult} runFactQuery={runFactQuery} counts={counts} /></>}
     </div>
   )
 }

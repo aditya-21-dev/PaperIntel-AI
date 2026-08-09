@@ -35,4 +35,26 @@ export async function queryKnowledgeFact(query) {
   return response.data
 }
 
+export async function getReasoningRules() {
+  const response = await api.get('/api/reasoning/rules', { timeout: 30000 })
+  return response.data
+}
+
+export async function runForwardReasoning(knowledgeBase) {
+  const response = await api.post('/api/reasoning/forward', { knowledge_base: knowledgeBase }, {
+    timeout: 30000,
+  })
+  return response.data
+}
+
+export async function runBackwardReasoning(knowledgeBase, goal) {
+  const response = await api.post('/api/reasoning/backward', {
+    knowledge_base: knowledgeBase,
+    goal,
+  }, {
+    timeout: 30000,
+  })
+  return response.data
+}
+
 export default api
