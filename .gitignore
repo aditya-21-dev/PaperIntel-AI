@@ -1,0 +1,29 @@
+# Environment and local configuration
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.pytest_cache-*/
+pytest-cache-files-*/
+*.tmp
+.venv/
+venv/
+
+# Local environment files
+.env
+backend/.env
+frontend/.env
+
+# Backend runtime directories
+backend/uploads/*
+!backend/uploads/.gitkeep
+backend/reports/*
+!backend/reports/.gitkeep
+
+# Frontend build artifacts
+frontend/node_modules/
+frontend/dist/
