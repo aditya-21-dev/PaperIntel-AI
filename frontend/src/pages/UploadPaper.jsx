@@ -1,4 +1,5 @@
 import { useRef, useState } from 'react'
+import { Link } from 'react-router-dom'
 import Icon from '../components/Icon'
 import { processPaper } from '../services/api'
 
@@ -184,6 +185,11 @@ export default function UploadPaper() {
       setProgress(100)
       setStatus('completed')
       setResult(data)
+      try {
+        sessionStorage.setItem('paperintel.structuredDocument', JSON.stringify(data))
+      } catch {
+        // The result view remains usable if a browser blocks or exhausts session storage.
+      }
     } catch (requestError) {
       const message = requestError.response?.data?.detail || requestError.message || 'The paper could not be processed. Please try another PDF.'
       setStatus('error')
@@ -226,7 +232,7 @@ export default function UploadPaper() {
         <div className="mt-6 flex flex-col gap-3 border-t border-slate-100 pt-6 sm:flex-row sm:items-center sm:justify-between"><p className="text-sm text-slate-500">Only extraction is performed—no quality or compliance scores are generated.</p><button type="button" disabled={!file || isBusy} onClick={handleProcess} className="primary-button disabled:cursor-not-allowed disabled:bg-slate-300 disabled:text-slate-600 disabled:hover:bg-slate-300"><Icon name={isBusy ? 'clock' : 'fileSearch'} className="h-4 w-4" />{isBusy ? 'Processing…' : status === 'error' ? 'Retry processing' : result ? 'Process again' : 'Process paper'}</button></div>
       </section>
 
-      {result && <AnalysisResults data={result} />}
+      {result && <><div className="mt-6 flex justify-end"><Link to="/knowledge-base" className="secondary-button"><Icon name="brain" className="h-4 w-4" /> Build knowledge base</Link></div><AnalysisResults data={result} /></>}
     </div>
   )
 }

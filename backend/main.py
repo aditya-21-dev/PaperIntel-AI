@@ -9,6 +9,7 @@ from fastapi.responses import JSONResponse
 from pymongo import MongoClient
 from pymongo.errors import PyMongoError
 
+from app.services.knowledge_engine import KnowledgeAgent, KnowledgeBaseInputError
 from app.services.pdf_parser import EmptyPDFError, PDFParser, PDFParsingError, PasswordProtectedPDFError
 
 load_dotenv(Path(__file__).with_name('.env'))
@@ -25,6 +26,7 @@ app = FastAPI(title='PaperIntel AI API', version='0.1.0')
 MAX_UPLOAD_SIZE = 20 * 1024 * 1024
 ALLOWED_PDF_MIME_TYPES = {'application/pdf', 'application/x-pdf'}
 pdf_parser = PDFParser()
+knowledge_agent = KnowledgeAgent()
 
 app.add_middleware(
     CORSMiddleware,
@@ -117,17 +119,17 @@ async def process_paper(file: UploadFile | None = File(default=None)) -> dict:
     except HTTPException:
         raise
     except PasswordProtectedPDFError:
-            raise HTTPException(
+        raise HTTPException(
             status_code=422,
             detail='This PDF is password-protected and cannot be processed.',
         ) from None
     except EmptyPDFError:
-            raise HTTPException(
+        raise HTTPException(
             status_code=422,
             detail='This PDF contains no extractable text.',
         ) from None
     except PDFParsingError:
-            raise HTTPException(
+        raise HTTPException(
             status_code=422,
             detail='The PDF could not be parsed. It may be corrupted or unsupported.',
         ) from None
@@ -135,6 +137,40 @@ async def process_paper(file: UploadFile | None = File(default=None)) -> dict:
         # Starlette may use a spooled temporary upload internally. Closing UploadFile releases
         # that resource on successful requests as well as all validation and parsing failures.
         await file.close()
+
+
+@app.post('/api/papers/knowledge-base')
+def generate_knowledge_base(structured_document: dict) -> dict:
+    """Transform Module 2 output into a deterministic, in-memory paper knowledge base."""
+    try:
+        knowledge_base, validation = knowledge_agent.perceive(structured_document)
+    except KnowledgeBaseInputError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from None
+
+    return {
+        'success': validation['valid'],
+        'knowledge_base': knowledge_base,
+        'validation': validation,
+    }
+
+
+@app.post('/api/knowledge/query')
+def query_knowledge_base(query: dict) -> dict:
+    """Look up an exact propositional fact from the current or supplied knowledge base."""
+    predicate = query.get('predicate')
+    arguments = query.get('arguments')
+    supplied_knowledge_base = query.get('knowledge_base')
+    if not isinstance(predicate, str) or not isinstance(arguments, list) or not all(isinstance(arg, str) for arg in arguments):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail='A predicate string and an arguments list of entity IDs are required.',
+        )
+    if supplied_knowledge_base is not None and not isinstance(supplied_knowledge_base, dict):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='knowledge_base must be an object when supplied.')
+    try:
+        return knowledge_agent.query_fact(predicate, arguments, supplied_knowledge_base)
+    except LookupError:
+        raise HTTPException(status_code=404, detail='No knowledge base is available. Generate one first.') from None
 
 
 @app.get('/health/database')

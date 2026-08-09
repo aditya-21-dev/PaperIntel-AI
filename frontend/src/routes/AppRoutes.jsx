@@ -5,6 +5,7 @@ import AnalyzePage from '../pages/AnalyzePage'
 import DashboardPage from '../pages/DashboardPage'
 import HistoryPage from '../pages/HistoryPage'
 import HomePage from '../pages/HomePage'
+import KnowledgeBasePage from '../pages/KnowledgeBasePage'
 import NotFoundPage from '../pages/NotFoundPage'
 
 export default function AppRoutes() {
@@ -14,6 +15,7 @@ export default function AppRoutes() {
         <Route path="/" element={<HomePage />} />
         <Route path="/analyze" element={<AnalyzePage />} />
         <Route path="/dashboard" element={<DashboardPage />} />
+        <Route path="/knowledge-base" element={<KnowledgeBasePage />} />
         <Route path="/history" element={<HistoryPage />} />
         <Route path="/about" element={<AboutPage />} />
         <Route path="*" element={<NotFoundPage />} />

@@ -21,4 +21,18 @@ export async function processPaper(file, onUploadProgress) {
   return response.data
 }
 
+export async function generateKnowledgeBase(structuredDocument) {
+  const response = await api.post('/api/papers/knowledge-base', structuredDocument, {
+    timeout: 30000,
+  })
+  return response.data
+}
+
+export async function queryKnowledgeFact(query) {
+  const response = await api.post('/api/knowledge/query', query, {
+    timeout: 30000,
+  })
+  return response.data
+}
+
 export default api
