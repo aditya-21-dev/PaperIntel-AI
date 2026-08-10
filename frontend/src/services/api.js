@@ -81,4 +81,21 @@ export async function checkLogicConsistency(knowledgeBase) {
   return response.data
 }
 
+export async function runComplianceCsp(knowledgeBase, profile) {
+  const response = await api.post('/api/compliance/csp', {
+    knowledge_base: knowledgeBase,
+    ...(profile ? { profile } : {}),
+  }, { timeout: 30000 })
+  return response.data
+}
+
+export async function runImprovementPlanning({ knowledgeBase, complianceResult, profile, method, actionCosts }) {
+  const response = await api.post('/api/planning/search', {
+    method,
+    ...(actionCosts ? { action_costs: actionCosts } : {}),
+    ...(complianceResult ? { compliance_result: complianceResult } : { knowledge_base: knowledgeBase, ...(profile ? { profile } : {}) }),
+  }, { timeout: 30000 })
+  return response.data
+}
+
 export default api

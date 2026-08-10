@@ -103,7 +103,7 @@ export default function KnowledgeBasePage() {
         </section>
       )}
 
-      {knowledgeBase && <><div className="mt-6 flex justify-end"><Link to="/reasoning" className="secondary-button"><Icon name="brain" className="h-4 w-4" /> Open reasoning engine</Link></div><KnowledgeBaseView knowledgeBase={knowledgeBase} activeTab={activeTab} setActiveTab={setActiveTab} selectedPredicate={selectedPredicate} setSelectedPredicate={setSelectedPredicate} queryResult={queryResult} runFactQuery={runFactQuery} counts={counts} /></>}
+      {knowledgeBase && <><div className="mt-6 flex flex-wrap justify-end gap-3"><Link to="/reasoning" className="secondary-button"><Icon name="brain" className="h-4 w-4" /> Open reasoning engine</Link><Link to="/compliance" className="secondary-button"><Icon name="shield" className="h-4 w-4" /> Check compliance</Link></div><KnowledgeBaseView knowledgeBase={knowledgeBase} activeTab={activeTab} setActiveTab={setActiveTab} selectedPredicate={selectedPredicate} setSelectedPredicate={setSelectedPredicate} queryResult={queryResult} runFactQuery={runFactQuery} counts={counts} /></>}
     </div>
   )
 }

@@ -9,10 +9,14 @@ from fastapi.responses import JSONResponse
 from pymongo import MongoClient
 from pymongo.errors import PyMongoError
 
+from app.compliance.agent import ComplianceAgent, ComplianceInputError
+from app.compliance.models import CSPValidationError
+from app.compliance.profiles import available_profiles
 from app.logic.agent import LogicAgent, LogicInputError
 from app.logic.models import FormulaValidationError
+from app.planning.agent import ImprovementPlanningAgent, PlanningInputError
 from app.reasoning.agent import ReasoningAgent
-from app.services.knowledge_engine import KnowledgeAgent, KnowledgeBaseInputError
+from app.services.knowledge_engine import KnowledgeAgent, KnowledgeBaseInputError, KnowledgeEngine
 from app.services.pdf_parser import EmptyPDFError, PDFParser, PDFParsingError, PasswordProtectedPDFError
 
 load_dotenv(Path(__file__).with_name('.env'))
@@ -32,6 +36,8 @@ pdf_parser = PDFParser()
 knowledge_agent = KnowledgeAgent()
 reasoning_agent = ReasoningAgent()
 logic_agent = LogicAgent()
+compliance_agent = ComplianceAgent()
+planning_agent = ImprovementPlanningAgent()
 
 app.add_middleware(
     CORSMiddleware,
@@ -259,6 +265,107 @@ def check_logical_consistency(request: dict) -> dict:
     try:
         return logic_agent.consistency(knowledge_base)
     except (LogicInputError, FormulaValidationError) as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from None
+
+
+def _compliance_inputs(request: dict) -> tuple[dict, object | None]:
+    if not isinstance(request, dict):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='Compliance input must be an object.')
+    knowledge_base = request.get('knowledge_base')
+    if not isinstance(knowledge_base, dict):
+        structured_document = request.get('structured_document')
+        if not isinstance(structured_document, dict):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail='A Module 3 knowledge_base or Module 2 structured_document object is required.',
+            )
+        try:
+            knowledge_base, validation = KnowledgeEngine().build(structured_document)
+        except KnowledgeBaseInputError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from None
+        if not validation['valid']:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='The supplied structured document could not form a valid knowledge base.')
+
+    profile = request.get('profile')
+    if profile is None and 'requirements' in request:
+        raw_requirements = request.get('requirements')
+        if isinstance(raw_requirements, dict) and 'requirements' in raw_requirements:
+            profile = raw_requirements
+        else:
+            profile = {
+                'profile_id': request.get('profile_id', 'custom'),
+                'name': request.get('profile_name'),
+                'venue': request.get('venue'),
+                'requirements': raw_requirements,
+            }
+    return knowledge_base, profile
+
+
+@app.get('/api/compliance/profiles')
+def list_compliance_profiles() -> dict:
+    """List the small controlled baseline profile; custom profiles are supplied per request."""
+    return {'profiles': available_profiles()}
+
+
+@app.post('/api/compliance/csp')
+def run_compliance_csp(request: dict) -> dict:
+    """Build a paper-compliance CSP, propagate it, and search for valid configurations."""
+    knowledge_base, profile = _compliance_inputs(request)
+    try:
+        return compliance_agent.analyze(knowledge_base, profile)
+    except (ComplianceInputError, CSPValidationError) as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from None
+
+
+@app.post('/api/compliance/validate')
+def validate_compliance_constraints(request: dict) -> dict:
+    """Evaluate observed paper values against declarative requirements without search."""
+    knowledge_base, profile = _compliance_inputs(request)
+    try:
+        return compliance_agent.validate(knowledge_base, profile)
+    except (ComplianceInputError, CSPValidationError) as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from None
+
+
+def _planning_limits(request: dict) -> tuple[int, int, float]:
+    max_states = request.get('max_states', 250)
+    max_depth = request.get('max_depth', 12)
+    max_seconds = request.get('max_seconds', 2.0)
+    if not isinstance(max_states, int) or isinstance(max_states, bool) or not 1 <= max_states <= 1000:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='max_states must be an integer between 1 and 1000.')
+    if not isinstance(max_depth, int) or isinstance(max_depth, bool) or not 0 <= max_depth <= 30:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='max_depth must be an integer between 0 and 30.')
+    if not isinstance(max_seconds, (int, float)) or isinstance(max_seconds, bool) or not 0 < max_seconds <= 10:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='max_seconds must be a number greater than 0 and no more than 10.')
+    return max_states, max_depth, float(max_seconds)
+
+
+@app.post('/api/planning/search')
+def search_improvement_plan(request: dict) -> dict:
+    """Search hypothetical improvement states from a Module 6 result or existing paper input."""
+    if not isinstance(request, dict):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='Planning input must be an object.')
+    method = request.get('method', 'astar')
+    if not isinstance(method, str) or method.casefold() not in {'ucs', 'astar'}:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="method must be 'ucs' or 'astar'.")
+    max_states, max_depth, max_seconds = _planning_limits(request)
+    compliance_result = request.get('compliance_result')
+    if compliance_result is None:
+        knowledge_base, profile = _compliance_inputs(request)
+        try:
+            compliance_result = compliance_agent.analyze(knowledge_base, profile)
+        except (ComplianceInputError, CSPValidationError) as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from None
+    try:
+        return planning_agent.plan(
+            compliance_result,
+            method,
+            max_states=max_states,
+            max_depth=max_depth,
+            max_seconds=max_seconds,
+            action_costs=request.get('action_costs'),
+        )
+    except (PlanningInputError, ValueError) as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from None
 
 

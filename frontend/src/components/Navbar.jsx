@@ -10,6 +10,8 @@ const navigationLinks = [
   { to: '/knowledge-base', label: 'Knowledge Base' },
   { to: '/reasoning', label: 'Reasoning' },
   { to: '/logical-verification', label: 'Logic Verification' },
+  { to: '/compliance', label: 'Compliance' },
+  { to: '/planning', label: 'Planning' },
   { to: '/history', label: 'History' },
   { to: '/about', label: 'About' },
 ]
