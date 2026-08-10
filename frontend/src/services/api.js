@@ -57,4 +57,28 @@ export async function runBackwardReasoning(knowledgeBase, goal) {
   return response.data
 }
 
+export async function runLogicModelCheck(knowledgeBase, query, includeModels = false) {
+  const response = await api.post('/api/logic/model-check', {
+    knowledge_base: knowledgeBase,
+    query,
+    include_models: includeModels,
+  }, { timeout: 30000 })
+  return response.data
+}
+
+export async function runResolutionProof(knowledgeBase, query) {
+  const response = await api.post('/api/logic/resolution', {
+    knowledge_base: knowledgeBase,
+    query,
+  }, { timeout: 30000 })
+  return response.data
+}
+
+export async function checkLogicConsistency(knowledgeBase) {
+  const response = await api.post('/api/logic/consistency', {
+    knowledge_base: knowledgeBase,
+  }, { timeout: 30000 })
+  return response.data
+}
+
 export default api

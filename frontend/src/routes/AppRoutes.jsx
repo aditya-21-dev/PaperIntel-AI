@@ -6,6 +6,7 @@ import DashboardPage from '../pages/DashboardPage'
 import HistoryPage from '../pages/HistoryPage'
 import HomePage from '../pages/HomePage'
 import KnowledgeBasePage from '../pages/KnowledgeBasePage'
+import LogicVerificationPage from '../pages/LogicVerificationPage'
 import NotFoundPage from '../pages/NotFoundPage'
 import ReasoningPage from '../pages/ReasoningPage'
 
@@ -18,6 +19,7 @@ export default function AppRoutes() {
         <Route path="/dashboard" element={<DashboardPage />} />
         <Route path="/knowledge-base" element={<KnowledgeBasePage />} />
         <Route path="/reasoning" element={<ReasoningPage />} />
+        <Route path="/logical-verification" element={<LogicVerificationPage />} />
         <Route path="/history" element={<HistoryPage />} />
         <Route path="/about" element={<AboutPage />} />
         <Route path="*" element={<NotFoundPage />} />

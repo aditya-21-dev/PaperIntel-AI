@@ -9,6 +9,8 @@ from fastapi.responses import JSONResponse
 from pymongo import MongoClient
 from pymongo.errors import PyMongoError
 
+from app.logic.agent import LogicAgent, LogicInputError
+from app.logic.models import FormulaValidationError
 from app.reasoning.agent import ReasoningAgent
 from app.services.knowledge_engine import KnowledgeAgent, KnowledgeBaseInputError
 from app.services.pdf_parser import EmptyPDFError, PDFParser, PDFParsingError, PasswordProtectedPDFError
@@ -29,6 +31,7 @@ ALLOWED_PDF_MIME_TYPES = {'application/pdf', 'application/x-pdf'}
 pdf_parser = PDFParser()
 knowledge_agent = KnowledgeAgent()
 reasoning_agent = ReasoningAgent()
+logic_agent = LogicAgent()
 
 app.add_middleware(
     CORSMiddleware,
@@ -203,6 +206,59 @@ def run_backward_reasoning(request: dict) -> dict:
     try:
         return reasoning_agent.backward_reason(goal, knowledge_base)
     except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from None
+
+
+def _logic_request(request: dict, require_query: bool = True) -> tuple[dict, object | None]:
+    knowledge_base = request.get('knowledge_base') if isinstance(request, dict) else None
+    query = request.get('query') if isinstance(request, dict) else None
+    if not isinstance(knowledge_base, dict):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='A Module 3 knowledge_base object is required.')
+    if require_query and not isinstance(query, dict):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='A structured logical query is required.')
+    return knowledge_base, query
+
+
+@app.post('/api/logic/model-check')
+def run_model_check(request: dict) -> dict:
+    """Semantically verify a query in every model satisfying Module 3/4 facts."""
+    knowledge_base, query = _logic_request(request)
+    include_models = request.get('include_models', False)
+    if not isinstance(include_models, bool):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='include_models must be Boolean when supplied.')
+    try:
+        return logic_agent.model_check(knowledge_base, query, include_models)
+    except (LogicInputError, FormulaValidationError) as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from None
+
+
+@app.post('/api/logic/resolution')
+def run_resolution(request: dict) -> dict:
+    """Verify a query through bounded propositional resolution and return its proof trace."""
+    knowledge_base, query = _logic_request(request)
+    try:
+        return logic_agent.resolution(knowledge_base, query)
+    except (LogicInputError, FormulaValidationError) as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from None
+
+
+@app.post('/api/logic/prove')
+def prove_logical_query(request: dict) -> dict:
+    """Expose the Module 5 propositional theorem-proving operation explicitly."""
+    knowledge_base, query = _logic_request(request)
+    try:
+        return logic_agent.prove(knowledge_base, query)
+    except (LogicInputError, FormulaValidationError) as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from None
+
+
+@app.post('/api/logic/consistency')
+def check_logical_consistency(request: dict) -> dict:
+    """Use resolution to determine whether the Module 3/4 propositional KB is satisfiable."""
+    knowledge_base, _ = _logic_request(request, require_query=False)
+    try:
+        return logic_agent.consistency(knowledge_base)
+    except (LogicInputError, FormulaValidationError) as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from None
 
 

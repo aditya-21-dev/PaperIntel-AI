@@ -1,6 +1,6 @@
-# PaperIntel AI — Modules 3 and 4 syllabus mapping
+# PaperIntel AI — Modules 3, 4, and 5 syllabus mapping
 
-Module 3 implements deterministic knowledge representation over the structured document produced by Module 2. Module 4 consumes only that structured knowledge base for rule-based reasoning; it does not parse the PDF again, duplicate knowledge engineering, or evaluate paper quality.
+Modules 3–5 form a deterministic knowledge pipeline. Module 3 creates the in-memory knowledge base from Module 2 structured extraction. Module 4 derives facts through rule-based inference. Module 5 verifies propositions semantically and by propositional resolution; it does not parse PDFs, introduce persistence, or replace Module 4’s inference algorithms.
 
 ## Module 3: implemented syllabus concepts
 
@@ -12,31 +12,36 @@ Module 3 implements deterministic knowledge representation over the structured d
 | Propositional Logic | Controlled Boolean facts such as `PaperHasAbstract(paper_001)` are stored with arguments, truth values, and evidence. |
 | Syntax and Semantics | Entity, fact, relationship, evidence, allowed predicate, and validation schemas are explicit. Undefined predicates and missing graph entities are validation errors. |
 | First-Order Logic Representation | Relationships use subject-predicate-object triples and a readable form such as `HasSection(paper_001, section_001)`. |
-| Agents based on Propositional Logic | The query endpoint performs deterministic exact lookup of stored propositional facts. |
 
 ## Module 4: implemented syllabus concepts
 
 | Syllabus concept | Module 4 implementation |
 | --- | --- |
-| Knowledge-Based Agents | `ReasoningAgent` perceives a validated Module 3 knowledge base, loads its facts, applies rules, answers goals, and returns explanations. |
-| Propositional Logic reasoning | Facts preserve explicit Boolean values. The engine distinguishes known true, known false, and unknown facts. |
-| Forward Chaining | A generic fixed-point engine applies the data-defined rule base until no new conclusions can be derived or a safety limit is reached. |
-| Backward Chaining | A separate goal-driven engine recursively checks rules and premises for a requested conclusion. |
+| Knowledge-Based Agents | `ReasoningAgent` perceives a validated Module 3 knowledge base, loads facts, applies rules, answers goals, and returns explanations. |
 | Rule-Based Inference | Rules contain identifiers, premises, conclusions, priorities, explanations, and source-module metadata; inference logic does not special-case paper rules. |
-| Explainable Knowledge-Based Reasoning | Forward rule firings and backward proof attempts retain rule IDs, supporting facts, missing facts, known false facts, and human-readable explanations. |
+| Forward Chaining | A generic fixed-point engine applies data-defined rules until no new conclusions can be derived or a safety limit is reached. |
+| Backward Chaining | A separate goal-driven engine recursively checks rules and premises for a requested conclusion. |
+| Explainable Knowledge-Based Reasoning | Rule firings and proof attempts retain rule IDs, supporting facts, missing facts, known false facts, and human-readable explanations. |
 
-Module 4’s only reasoning input is the Module 3 knowledge base. Derived facts are returned separately from the source knowledge base so later modules can consume both without PDF reparsing.
+## Module 5: implemented syllabus concepts
+
+| Syllabus concept | Module 5 implementation |
+| --- | --- |
+| Propositional Logic | Validated immutable formula ASTs support atoms, NOT, AND, OR, implication, and biconditional; a deterministic evaluator assigns Boolean truth values. |
+| Propositional Theorem Proving | The engine checks a query and its negation through refutation, returning `ENTAILED`, `CONTRADICTED`, or `UNKNOWN` when the KB is consistent. |
+| Model Checking | Bounded exhaustive model checking evaluates the query in every Boolean model satisfying the supplied Module 3/4 propositions. |
+| Resolution | Formulas are converted to CNF through implication elimination, NNF, and distribution. Structured literals and clauses are saturated by resolution with proof traces, pair de-duplication, and safety limits. |
+| Logical Consistency | Resolution determines whether the propositional clause set is satisfiable and reports direct unit conflicts or an empty-clause proof of inconsistency. |
+| Agents Based on Propositional Logic | `LogicAgent` converts Module 3 facts and Module 4 derived facts into propositions while retaining Module 4 rules and traces in the verification result. |
+
+Module 5’s input remains entirely in memory. It does not configure or require MongoDB, use LLMs or machine learning, or reparse a PDF.
 
 ## Deliberately not implemented yet
 
 The following concepts are reserved for later modules and are **not** claimed as implemented here:
 
-- Resolution
-- Model Checking
-- Heuristic Search
-- Local Search
-- Constraint Satisfaction Problems (CSP)
-- Game Playing
-- Alpha-Beta pruning
-
-Modules 3 and 4 also contain no LLM integration, machine learning, scoring, compliance assessment, citation-quality assessment, or recommendation engine.
+- First-order logic theorem proving
+- Constraint Satisfaction Problems (CSP) or constraint propagation
+- Heuristic or local search
+- Game playing or Alpha-Beta pruning
+- Machine learning, training datasets, or external LLM reasoning

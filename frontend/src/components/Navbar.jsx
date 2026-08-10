@@ -9,6 +9,7 @@ const navigationLinks = [
   { to: '/dashboard', label: 'Dashboard' },
   { to: '/knowledge-base', label: 'Knowledge Base' },
   { to: '/reasoning', label: 'Reasoning' },
+  { to: '/logical-verification', label: 'Logic Verification' },
   { to: '/history', label: 'History' },
   { to: '/about', label: 'About' },
 ]
