@@ -4,6 +4,7 @@ import AboutPage from '../pages/AboutPage'
 import AnalyzePage from '../pages/AnalyzePage'
 import CompliancePage from '../pages/CompliancePage'
 import DashboardPage from '../pages/DashboardPage'
+import EvaluationPage from '../pages/EvaluationPage'
 import HistoryPage from '../pages/HistoryPage'
 import HomePage from '../pages/HomePage'
 import KnowledgeBasePage from '../pages/KnowledgeBasePage'
@@ -18,7 +19,9 @@ export default function AppRoutes() {
       <Route element={<MainLayout />}>
         <Route path="/" element={<HomePage />} />
         <Route path="/analyze" element={<AnalyzePage />} />
+        <Route path="/analysis" element={<DashboardPage />} />
         <Route path="/dashboard" element={<DashboardPage />} />
+        <Route path="/evaluation" element={<EvaluationPage />} />
         <Route path="/knowledge-base" element={<KnowledgeBasePage />} />
         <Route path="/reasoning" element={<ReasoningPage />} />
         <Route path="/logical-verification" element={<LogicVerificationPage />} />

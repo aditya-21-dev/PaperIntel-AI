@@ -98,4 +98,18 @@ export async function runImprovementPlanning({ knowledgeBase, complianceResult, 
   return response.data
 }
 
+export async function runIntegratedAnalysis({ paper, requirements, options }) {
+  const response = await api.post('/api/analysis/run', {
+    paper,
+    ...(requirements ? { requirements } : {}),
+    ...(options ? { options } : {}),
+  }, { timeout: 60000 })
+  return response.data
+}
+
+export async function runSystemEvaluation() {
+  const response = await api.post('/api/evaluation/run', {}, { timeout: 120000 })
+  return response.data
+}
+
 export default api

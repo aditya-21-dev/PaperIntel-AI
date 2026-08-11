@@ -1,9 +1,14 @@
 import os
+import logging
+import uuid
+from contextlib import asynccontextmanager
 from functools import lru_cache
 from pathlib import Path
+from time import perf_counter
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, File, HTTPException, UploadFile, status
+from fastapi import FastAPI, File, HTTPException, Request, UploadFile, status
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pymongo import MongoClient
@@ -12,8 +17,11 @@ from pymongo.errors import PyMongoError
 from app.compliance.agent import ComplianceAgent, ComplianceInputError
 from app.compliance.models import CSPValidationError
 from app.compliance.profiles import available_profiles
+from app.evaluation.agent import SystemEvaluationAgent
+from app.integration.agent import IntegratedAnalysisAgent, IntegrationInputError
 from app.logic.agent import LogicAgent, LogicInputError
 from app.logic.models import FormulaValidationError
+from app.observability import configure_logging, log_event
 from app.planning.agent import ImprovementPlanningAgent, PlanningInputError
 from app.reasoning.agent import ReasoningAgent
 from app.services.knowledge_engine import KnowledgeAgent, KnowledgeBaseInputError, KnowledgeEngine
@@ -21,6 +29,39 @@ from app.services.pdf_parser import EmptyPDFError, PDFParser, PDFParsingError, P
 
 load_dotenv(Path(__file__).with_name('.env'))
 
+
+def _environment_value(name: str, default: str, allowed: set[str]) -> str:
+    value = os.getenv(name, default).strip().casefold() or default
+    if value not in allowed:
+        raise RuntimeError(f'{name} must be one of {sorted(allowed)}.')
+    return value
+
+
+def _positive_integer_environment(name: str, default: int, minimum: int, maximum: int) -> int:
+    raw = os.getenv(name, str(default)).strip()
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise RuntimeError(f'{name} must be an integer between {minimum} and {maximum}.') from exc
+    if not minimum <= value <= maximum:
+        raise RuntimeError(f'{name} must be an integer between {minimum} and {maximum}.')
+    return value
+
+
+def _boolean_environment(name: str, default: bool) -> bool:
+    raw = os.getenv(name, str(default)).strip().casefold()
+    if raw in {'1', 'true', 'yes', 'on'}:
+        return True
+    if raw in {'0', 'false', 'no', 'off'}:
+        return False
+    raise RuntimeError(f'{name} must be a Boolean value.')
+
+
+APP_ENV = _environment_value('APP_ENV', 'development', {'development', 'testing', 'production'})
+LOG_LEVEL = os.getenv('LOG_LEVEL', 'INFO').strip().upper() or 'INFO'
+API_DOCS_ENABLED = _boolean_environment('ENABLE_API_DOCS', APP_ENV != 'production')
+MAX_UPLOAD_SIZE_MB = _positive_integer_environment('MAX_UPLOAD_SIZE_MB', 20, 1, 100)
+logger = configure_logging(LOG_LEVEL)
 MONGO_URI = os.getenv('MONGO_URI', '').strip()
 DATABASE_NAME = os.getenv('DATABASE_NAME', 'paperintel_ai').strip() or 'paperintel_ai'
 FRONTEND_ORIGINS = [
@@ -28,9 +69,27 @@ FRONTEND_ORIGINS = [
     for origin in os.getenv('FRONTEND_ORIGINS', 'http://localhost:5173,http://127.0.0.1:5173').split(',')
     if origin.strip()
 ]
+if not FRONTEND_ORIGINS or '*' in FRONTEND_ORIGINS:
+    raise RuntimeError('FRONTEND_ORIGINS must contain one or more explicit origins; wildcard origins are not permitted.')
 
-app = FastAPI(title='PaperIntel AI API', version='0.1.0')
-MAX_UPLOAD_SIZE = 20 * 1024 * 1024
+
+@asynccontextmanager
+async def application_lifespan(_: FastAPI):
+    """Release the optional MongoDB client cleanly when the API stops."""
+    yield
+    if get_mongo_client.cache_info().currsize:
+        get_mongo_client().close()
+        get_mongo_client.cache_clear()
+
+
+app = FastAPI(
+    title='PaperIntel AI API',
+    version='0.1.0',
+    docs_url='/docs' if API_DOCS_ENABLED else None,
+    redoc_url='/redoc' if API_DOCS_ENABLED else None,
+    lifespan=application_lifespan,
+)
+MAX_UPLOAD_SIZE = MAX_UPLOAD_SIZE_MB * 1024 * 1024
 ALLOWED_PDF_MIME_TYPES = {'application/pdf', 'application/x-pdf'}
 pdf_parser = PDFParser()
 knowledge_agent = KnowledgeAgent()
@@ -38,6 +97,14 @@ reasoning_agent = ReasoningAgent()
 logic_agent = LogicAgent()
 compliance_agent = ComplianceAgent()
 planning_agent = ImprovementPlanningAgent()
+evaluation_agent = SystemEvaluationAgent()
+integration_agent = IntegratedAnalysisAgent(
+    knowledge_agent,
+    reasoning_agent,
+    logic_agent,
+    compliance_agent,
+    planning_agent,
+)
 
 app.add_middleware(
     CORSMiddleware,
@@ -45,7 +112,76 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=['GET', 'POST'],
     allow_headers=['*'],
+    expose_headers=['X-Request-ID'],
 )
+
+
+@app.middleware('http')
+async def log_api_request(request: Request, call_next):
+    """Attach a correlation ID and record safe request metadata without logging bodies."""
+    request_id = uuid.uuid4().hex[:16]
+    request.state.request_id = request_id
+    started = perf_counter()
+    try:
+        response = await call_next(request)
+    except Exception as exc:
+        log_event(
+            logger, 'api_request_failed', level=logging.ERROR,
+            request_id=request_id, method=request.method, path=request.url.path,
+            error_type=type(exc).__name__, duration_ms=round((perf_counter() - started) * 1000, 3),
+        )
+        raise
+    response.headers['X-Request-ID'] = request_id
+    log_event(
+        logger, 'api_request_completed',
+        level=logging.WARNING if response.status_code >= 500 else logging.INFO,
+        request_id=request_id, method=request.method, path=request.url.path,
+        status_code=response.status_code, duration_ms=round((perf_counter() - started) * 1000, 3),
+    )
+    return response
+
+
+@app.exception_handler(RequestValidationError)
+async def handle_request_validation_error(request: Request, exc: RequestValidationError) -> JSONResponse:
+    """Avoid reflecting request payloads or framework internals in validation responses."""
+    log_event(
+        logger, 'api_request_validation_failed', level=logging.WARNING,
+        request_id=getattr(request.state, 'request_id', None), path=request.url.path,
+        validation_error_count=len(exc.errors()),
+    )
+    return JSONResponse(
+        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+        content={'detail': 'Invalid request data.', 'error_code': 'VALIDATION_ERROR'},
+    )
+
+
+@app.exception_handler(HTTPException)
+async def handle_http_exception(request: Request, exc: HTTPException) -> JSONResponse:
+    """Keep expected client failures structured while preserving safe endpoint messages."""
+    log_event(
+        logger, 'api_request_rejected', level=logging.WARNING if exc.status_code >= 400 else logging.INFO,
+        request_id=getattr(request.state, 'request_id', None), path=request.url.path,
+        status_code=exc.status_code,
+    )
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={'detail': exc.detail, 'error_code': 'REQUEST_ERROR'},
+        headers=exc.headers,
+    )
+
+
+@app.exception_handler(Exception)
+async def handle_unexpected_exception(request: Request, exc: Exception) -> JSONResponse:
+    """Return no stack traces, credentials, or filesystem details to API clients."""
+    log_event(
+        logger, 'api_unexpected_error', level=logging.ERROR,
+        request_id=getattr(request.state, 'request_id', None), path=request.url.path,
+        error_type=type(exc).__name__,
+    )
+    return JSONResponse(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        content={'detail': 'An unexpected server error occurred.', 'error_code': 'INTERNAL_ERROR'},
+    )
 
 
 @lru_cache
@@ -130,16 +266,19 @@ async def process_paper(file: UploadFile | None = File(default=None)) -> dict:
     except HTTPException:
         raise
     except PasswordProtectedPDFError:
+        log_event(logger, 'pdf_processing_failed', level=logging.WARNING, reason='password_protected')
         raise HTTPException(
             status_code=422,
             detail='This PDF is password-protected and cannot be processed.',
         ) from None
     except EmptyPDFError:
+        log_event(logger, 'pdf_processing_failed', level=logging.WARNING, reason='empty_pdf')
         raise HTTPException(
             status_code=422,
             detail='This PDF contains no extractable text.',
         ) from None
     except PDFParsingError:
+        log_event(logger, 'pdf_processing_failed', level=logging.WARNING, reason='parse_error')
         raise HTTPException(
             status_code=422,
             detail='The PDF could not be parsed. It may be corrupted or unsupported.',
@@ -369,6 +508,36 @@ def search_improvement_plan(request: dict) -> dict:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from None
 
 
+@app.post('/api/analysis/run')
+def run_integrated_analysis(request: dict) -> dict:
+    """Run Modules 3--7 once and return Module 8's explainable unified report."""
+    if not isinstance(request, dict):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='Integrated analysis input must be an object.')
+    paper = request.get('paper')
+    if not isinstance(paper, dict):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail='paper must be a Module 2 structured-paper object.',
+        )
+    try:
+        return integration_agent.run(
+            paper,
+            request.get('requirements'),
+            request.get('options'),
+        )
+    except (IntegrationInputError, ValueError) as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from None
+
+
+@app.post('/api/evaluation/run')
+def run_system_evaluation() -> dict:
+    """Execute Module 9's maintained deterministic benchmarks in memory."""
+    started = perf_counter()
+    result = evaluation_agent.run()
+    result['api_response_time_ms'] = round((perf_counter() - started) * 1000, 3)
+    return result
+
+
 @app.get('/health/database')
 def database_health_check():
     """Verify the configured MongoDB server is reachable without exposing credentials."""
@@ -388,10 +557,3 @@ def database_health_check():
         )
 
     return {'database': 'MongoDB', 'status': 'connected'}
-
-
-@app.on_event('shutdown')
-def close_mongo_connection() -> None:
-    if get_mongo_client.cache_info().currsize:
-        get_mongo_client().close()
-        get_mongo_client.cache_clear()

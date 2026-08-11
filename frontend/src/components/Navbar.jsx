@@ -6,7 +6,8 @@ import Icon from './Icon'
 const navigationLinks = [
   { to: '/', label: 'Home', end: true },
   { to: '/analyze', label: 'Analyze Paper' },
-  { to: '/dashboard', label: 'Dashboard' },
+  { to: '/analysis', label: 'Integrated Analysis' },
+  { to: '/evaluation', label: 'Evaluation' },
   { to: '/knowledge-base', label: 'Knowledge Base' },
   { to: '/reasoning', label: 'Reasoning' },
   { to: '/logical-verification', label: 'Logic Verification' },

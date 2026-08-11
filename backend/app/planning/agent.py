@@ -2,15 +2,20 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from app.compliance.agent import ComplianceAgent, MappedValue
 from app.compliance.models import CSPValidationError
 from app.compliance.profiles import resolve_profile
+from app.observability import log_event
 
 from .actions import build_improvement_actions
 from .models import PaperState, StateValue
 from .search import PlanningProblem, SearchPlanner
+
+
+logger = logging.getLogger('paperintel.planning')
 
 
 class PlanningInputError(ValueError):
@@ -70,6 +75,11 @@ class ImprovementPlanningAgent:
             )
         planner = SearchPlanner(max_states=max_states, max_depth=max_depth, max_seconds=max_seconds)
         result = planner.solve(problem, method)
+        if result['status'] in {'NO_SOLUTION', 'SEARCH_LIMIT_REACHED'}:
+            log_event(
+                logger, 'planning_search_not_completed', level=logging.WARNING,
+                algorithm=result['algorithm'], status=result['status'], states_explored=result['states_explored'],
+            )
         return {
             **result,
             'profile': profile,
