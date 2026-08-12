@@ -14,6 +14,7 @@ const navigationLinks = [
   { to: '/compliance', label: 'Compliance' },
   { to: '/planning', label: 'Planning' },
   { to: '/history', label: 'History' },
+  { to: '/comparison', label: 'Compare' },
   { to: '/about', label: 'About' },
 ]
 

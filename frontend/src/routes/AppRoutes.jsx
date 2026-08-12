@@ -1,4 +1,5 @@
 import { Route, Routes } from 'react-router-dom'
+import ComparisonPage from '../pages/ComparisonPage'
 import MainLayout from '../layouts/MainLayout'
 import AboutPage from '../pages/AboutPage'
 import AnalyzePage from '../pages/AnalyzePage'
@@ -28,6 +29,7 @@ export default function AppRoutes() {
         <Route path="/compliance" element={<CompliancePage />} />
         <Route path="/planning" element={<PlanningPage />} />
         <Route path="/history" element={<HistoryPage />} />
+        <Route path="/comparison" element={<ComparisonPage />} />
         <Route path="/about" element={<AboutPage />} />
         <Route path="*" element={<NotFoundPage />} />
       </Route>

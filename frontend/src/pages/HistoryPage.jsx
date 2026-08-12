@@ -1,23 +1,59 @@
-import { useMemo, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { useEffect, useState } from 'react'
+import { Link, useNavigate } from 'react-router-dom'
 import Icon from '../components/Icon'
+import { getPaperAnalysisHistory, getSavedAnalysis, getSavedPapers } from '../services/api'
 
-const historyRows = [
-  { paper: 'Neural Network Optimization Study', guideline: 'IEEE', date: '2026-07-18', score: 87, status: 'Demo Analysis' },
-  { paper: 'Sustainable Edge Computing', guideline: 'ACM', date: '2026-07-05', score: 82, status: 'Demo Analysis' },
-  { paper: 'Privacy-Preserving Data Systems', guideline: 'Springer', date: '2026-06-21', score: 91, status: 'Demo Analysis' },
-  { paper: 'Adaptive Learning Framework', guideline: 'Elsevier', date: '2026-06-02', score: 76, status: 'Demo Analysis' },
-]
+function formatDate(value) {
+  if (!value) return 'Unknown date'
+  const parsed = new Date(value)
+  return Number.isNaN(parsed.getTime()) ? 'Unknown date' : new Intl.DateTimeFormat('en-US', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }).format(parsed)
+}
 
 export default function HistoryPage() {
-  const [query, setQuery] = useState('')
-  const [guideline, setGuideline] = useState('All guidelines')
-  const [sortOrder, setSortOrder] = useState('newest')
-  const results = useMemo(() => historyRows.filter((row) => row.paper.toLowerCase().includes(query.toLowerCase()) && (guideline === 'All guidelines' || row.guideline === guideline)).sort((a, b) => sortOrder === 'score' ? b.score - a.score : new Date(b.date) - new Date(a.date)), [query, guideline, sortOrder])
+  const navigate = useNavigate()
+  const [papers, setPapers] = useState([])
+  const [status, setStatus] = useState('loading')
+  const [error, setError] = useState('')
+  const [openingPaperId, setOpeningPaperId] = useState('')
 
-  return (
-    <div className="page-container py-12 sm:py-16"><div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between"><div><p className="eyebrow">History · mock data</p><h1 className="section-title mt-3">Previous paper reviews</h1><p className="mt-3 text-slate-600">This sample history is for interface preview only; results are not stored during Module 1.</p></div><span className="inline-flex w-fit items-center gap-2 rounded-full bg-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600"><Icon name="info" className="h-4 w-4" /> No database records yet</span></div>
-      <section className="surface-card mt-8 overflow-hidden"><div className="grid gap-3 border-b border-slate-200 p-4 md:grid-cols-[minmax(0,1fr)_190px_170px]"><label className="relative block"><span className="sr-only">Search paper history</span><Icon name="search" className="pointer-events-none absolute left-3 top-3 h-4 w-4 text-slate-400" /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search papers" className="w-full rounded-lg border border-slate-300 py-2.5 pl-9 pr-3 text-sm text-slate-800 placeholder:text-slate-400" /></label><label className="relative block"><span className="sr-only">Filter by guideline</span><select value={guideline} onChange={(event) => setGuideline(event.target.value)} className="w-full appearance-none rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-700"><option>All guidelines</option><option>IEEE</option><option>ACM</option><option>Springer</option><option>Elsevier</option></select><Icon name="filter" className="pointer-events-none absolute right-3 top-3 h-4 w-4 text-slate-500" /></label><label className="relative block"><span className="sr-only">Sort history</span><select value={sortOrder} onChange={(event) => setSortOrder(event.target.value)} className="w-full appearance-none rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-700"><option value="newest">Newest first</option><option value="score">Highest score</option></select><Icon name="chevronDown" className="pointer-events-none absolute right-3 top-3 h-4 w-4 text-slate-500" /></label></div>
-        <div className="overflow-x-auto"><table className="w-full min-w-[720px] text-left text-sm"><thead className="bg-slate-50 text-xs uppercase tracking-wider text-slate-500"><tr>{['Paper', 'Guideline', 'Date', 'Score', 'Status', 'Action'].map((head) => <th key={head} className="px-5 py-3 font-semibold">{head}</th>)}</tr></thead><tbody className="divide-y divide-slate-200">{results.map((row) => <tr key={row.paper} className="text-slate-700"><td className="px-5 py-4 font-medium text-slate-900">{row.paper}</td><td className="px-5 py-4">{row.guideline}</td><td className="px-5 py-4">{new Intl.DateTimeFormat('en-US', { day: '2-digit', month: 'short', year: 'numeric' }).format(new Date(`${row.date}T00:00:00`))}</td><td className="px-5 py-4 font-semibold text-indigo-700">{row.score} / 100</td><td className="px-5 py-4"><span className="rounded-full bg-indigo-50 px-2.5 py-1 text-xs font-semibold text-indigo-700">{row.status}</span></td><td className="px-5 py-4"><Link to="/dashboard" className="text-sm font-semibold text-indigo-700 hover:text-indigo-900">View demo</Link></td></tr>)}</tbody></table>{results.length === 0 && <p className="p-8 text-center text-sm text-slate-500">No mock records match these filters.</p>}</div></section></div>
-  )
+  const loadHistory = async () => {
+    setStatus('loading')
+    setError('')
+    try {
+      const response = await getSavedPapers()
+      setPapers(response.papers || [])
+      setStatus('ready')
+    } catch (requestError) {
+      setError(requestError.response?.data?.detail || requestError.message || 'Saved paper history could not be loaded.')
+      setStatus('error')
+    }
+  }
+
+  useEffect(() => {
+    loadHistory()
+  }, [])
+
+  const openLatestAnalysis = async (paperId) => {
+    setOpeningPaperId(paperId)
+    setError('')
+    try {
+      const history = await getPaperAnalysisHistory(paperId)
+      const latest = history.analyses?.[0]
+      if (!latest) throw new Error('No saved analyses are available for this paper yet.')
+      const response = await getSavedAnalysis(latest.analysis_id)
+      sessionStorage.setItem('paperintel.integratedAnalysis', JSON.stringify(response.analysis))
+      sessionStorage.setItem('paperintel.persistedPaperId', JSON.stringify(paperId))
+      navigate('/analysis')
+    } catch (requestError) {
+      setError(requestError.response?.data?.detail || requestError.message || 'Saved analysis could not be opened.')
+    } finally {
+      setOpeningPaperId('')
+    }
+  }
+
+  return <div className="page-container py-12 sm:py-16"><div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between"><div><p className="eyebrow">Module 11 · MongoDB persistence</p><h1 className="section-title mt-3">Previous paper analyses</h1><p className="mt-3 max-w-2xl text-slate-600">Saved Module 8 results are listed here when MongoDB persistence is configured. Uploaded PDF binaries are never stored.</p></div><button type="button" onClick={loadHistory} disabled={status === 'loading'} className="secondary-button disabled:cursor-not-allowed disabled:opacity-60"><Icon name={status === 'loading' ? 'clock' : 'activity'} className="h-4 w-4" />{status === 'loading' ? 'Loading…' : 'Refresh history'}</button></div>
+    {error && <section className="mt-8 rounded-xl border border-amber-200 bg-amber-50 p-5 text-amber-950"><div className="flex gap-3"><Icon name="warning" className="mt-0.5 h-5 w-5 shrink-0" /><div><h2 className="font-semibold">History is unavailable</h2><p className="mt-1 text-sm leading-6">{error}</p></div></div></section>}
+    {status === 'ready' && papers.length === 0 && <section className="surface-card mt-8 p-6 sm:p-8"><span className="flex h-11 w-11 items-center justify-center rounded-lg bg-indigo-50 text-indigo-700"><Icon name="document" className="h-5 w-5" /></span><h2 className="mt-5 text-xl font-semibold text-slate-900">No saved analyses yet</h2><p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">Run an integrated analysis after MongoDB is configured to save its structured result and see it here.</p><Link to="/analysis" className="primary-button mt-6"><Icon name="activity" className="h-4 w-4" /> Open integrated analysis</Link></section>}
+    {status === 'ready' && papers.length > 0 && <section className="surface-card mt-8 overflow-hidden"><div className="overflow-x-auto"><table className="w-full min-w-[680px] text-left text-sm"><thead className="bg-slate-50 text-xs uppercase tracking-wider text-slate-500"><tr>{['Paper', 'Filename', 'Pages', 'Saved', 'Action'].map((head) => <th key={head} className="px-5 py-3 font-semibold">{head}</th>)}</tr></thead><tbody className="divide-y divide-slate-200">{papers.map((paper) => <tr key={paper.paper_id} className="text-slate-700"><td className="px-5 py-4 font-medium text-slate-900">{paper.metadata?.title || 'Untitled paper'}</td><td className="px-5 py-4">{paper.filename}</td><td className="px-5 py-4">{paper.page_count}</td><td className="px-5 py-4">{formatDate(paper.created_at)}</td><td className="px-5 py-4"><button type="button" onClick={() => openLatestAnalysis(paper.paper_id)} disabled={openingPaperId === paper.paper_id} className="text-sm font-semibold text-indigo-700 hover:text-indigo-900 disabled:cursor-not-allowed disabled:text-slate-400">{openingPaperId === paper.paper_id ? 'Opening…' : 'Open latest analysis'}</button></td></tr>)}</tbody></table></div></section>}
+  </div>
 }

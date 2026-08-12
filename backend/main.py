@@ -23,6 +23,17 @@ from app.logic.agent import LogicAgent, LogicInputError
 from app.logic.models import FormulaValidationError
 from app.observability import configure_logging, log_event
 from app.planning.agent import ImprovementPlanningAgent, PlanningInputError
+from app.comparison.service import (
+    AnalysisComparisonMismatchError,
+    AnalysisNotFoundError,
+    compare_stored_analyses,
+)
+from app.persistence.repository import (
+    MongoAnalysisRepository,
+    PersistenceConfigurationError,
+    PersistenceUnavailableError,
+    PersistenceValidationError,
+)
 from app.reasoning.agent import ReasoningAgent
 from app.services.knowledge_engine import KnowledgeAgent, KnowledgeBaseInputError, KnowledgeEngine
 from app.services.pdf_parser import EmptyPDFError, PDFParser, PDFParsingError, PasswordProtectedPDFError
@@ -80,6 +91,7 @@ async def application_lifespan(_: FastAPI):
     if get_mongo_client.cache_info().currsize:
         get_mongo_client().close()
         get_mongo_client.cache_clear()
+    get_persistence.cache_clear()
 
 
 app = FastAPI(
@@ -194,6 +206,77 @@ def get_mongo_client() -> MongoClient:
         serverSelectionTimeoutMS=5000,
         connectTimeoutMS=5000,
     )
+
+
+@lru_cache
+def get_persistence() -> MongoAnalysisRepository:
+    """Bind Module 11 to the existing shared client only after a real server ping."""
+    if not MONGO_URI:
+        raise PersistenceConfigurationError('MongoDB persistence is not configured.')
+    try:
+        client = get_mongo_client()
+        client.admin.command('ping')
+    except (PyMongoError, RuntimeError) as exc:
+        raise PersistenceUnavailableError('MongoDB persistence is unavailable.') from exc
+    return MongoAnalysisRepository(client[DATABASE_NAME])
+
+
+def _persistence_or_http() -> MongoAnalysisRepository:
+    try:
+        return get_persistence()
+    except PersistenceConfigurationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail='MongoDB persistence is not configured. Set MONGO_URI to enable saved history.',
+        ) from exc
+    except PersistenceUnavailableError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail='MongoDB persistence is currently unavailable. Try again later.',
+        ) from exc
+
+
+def _persist_integrated_analysis(
+    paper: dict,
+    analysis: dict,
+    supplied_paper_id: object | None,
+) -> dict[str, str]:
+    """Persist after Module 8 completes; a database outage never mutates its result."""
+    try:
+        repository = get_persistence()
+        if supplied_paper_id is None:
+            stored_paper = repository.save_paper(paper)
+            paper_id = stored_paper['paper_id']
+        else:
+            stored_paper = repository.get_paper(supplied_paper_id)
+            if stored_paper is None:
+                return {
+                    'status': 'PAPER_NOT_FOUND',
+                    'message': 'The supplied stored paper could not be found; the analysis was not saved.',
+                }
+            paper_id = stored_paper['paper_id']
+        stored_analysis = repository.save_analysis(paper_id, analysis)
+        log_event(logger, 'analysis_persisted', paper_id=paper_id, analysis_id=stored_analysis['analysis_id'])
+        return {
+            'status': 'SAVED', 'paper_id': paper_id, 'analysis_id': stored_analysis['analysis_id'],
+        }
+    except PersistenceConfigurationError:
+        return {
+            'status': 'NOT_CONFIGURED',
+            'message': 'MongoDB persistence is not configured. The analysis result was returned but not saved.',
+        }
+    except PersistenceValidationError:
+        log_event(logger, 'analysis_persistence_rejected', level=logging.WARNING)
+        return {
+            'status': 'NOT_SAVED',
+            'message': 'The analysis could not be persisted because its structured paper data is incomplete.',
+        }
+    except PersistenceUnavailableError:
+        log_event(logger, 'analysis_persistence_unavailable', level=logging.WARNING)
+        return {
+            'status': 'UNAVAILABLE',
+            'message': 'MongoDB persistence is unavailable. The analysis result was returned but not saved.',
+        }
 
 
 @app.get('/')
@@ -519,14 +602,123 @@ def run_integrated_analysis(request: dict) -> dict:
             status_code=status.HTTP_400_BAD_REQUEST,
             detail='paper must be a Module 2 structured-paper object.',
         )
+    supplied_paper_id = request.get('paper_id')
+    if supplied_paper_id is not None and not isinstance(supplied_paper_id, str):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='paper_id must be a string when supplied.')
     try:
-        return integration_agent.run(
+        result = integration_agent.run(
             paper,
             request.get('requirements'),
             request.get('options'),
         )
+        result['persistence'] = _persist_integrated_analysis(paper, result, supplied_paper_id)
+        return result
     except (IntegrationInputError, ValueError) as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from None
+
+
+@app.post('/api/papers')
+def save_paper(request: dict) -> dict:
+    """Save safe Module 2 metadata; the original PDF binary is never persisted."""
+    repository = _persistence_or_http()
+    try:
+        return {'success': True, 'paper': repository.save_paper(request)}
+    except PersistenceValidationError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from None
+    except PersistenceUnavailableError as exc:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail='MongoDB persistence is currently unavailable. Try again later.') from exc
+
+
+@app.get('/api/papers')
+def list_saved_papers(limit: int = 50) -> dict:
+    """List saved paper metadata without loading stored analysis payloads."""
+    repository = _persistence_or_http()
+    try:
+        return {'success': True, 'papers': repository.list_papers(limit)}
+    except PersistenceValidationError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from None
+    except PersistenceUnavailableError as exc:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail='MongoDB persistence is currently unavailable. Try again later.') from exc
+
+
+@app.get('/api/papers/{paper_id}')
+def get_saved_paper(paper_id: str) -> dict:
+    """Retrieve one saved paper metadata record by its public application ID."""
+    repository = _persistence_or_http()
+    try:
+        paper = repository.get_paper(paper_id)
+    except PersistenceValidationError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from None
+    except PersistenceUnavailableError as exc:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail='MongoDB persistence is currently unavailable. Try again later.') from exc
+    if paper is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Stored paper not found.')
+    return {'success': True, 'paper': paper}
+
+
+@app.post('/api/analyses')
+def save_analysis(request: dict) -> dict:
+    """Persist an existing Module 8 result for a previously saved paper."""
+    if not isinstance(request, dict):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='Analysis persistence input must be an object.')
+    repository = _persistence_or_http()
+    try:
+        analysis = repository.save_analysis(request.get('paper_id'), request.get('analysis'))
+        return {'success': True, 'analysis': analysis}
+    except PersistenceValidationError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from None
+    except PersistenceUnavailableError as exc:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail='MongoDB persistence is currently unavailable. Try again later.') from exc
+
+
+@app.get('/api/analyses/compare/{analysis_id_a}/{analysis_id_b}')
+def compare_saved_analyses(analysis_id_a: str, analysis_id_b: str) -> dict:
+    """Compare two stored Module 8 analyses for the same paper using persisted results only."""
+    repository = _persistence_or_http()
+    try:
+        analysis_a = repository.get_analysis(analysis_id_a)
+        analysis_b = repository.get_analysis(analysis_id_b)
+    except PersistenceValidationError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from None
+    except PersistenceUnavailableError as exc:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail='MongoDB persistence is currently unavailable. Try again later.') from exc
+    if analysis_a is None or analysis_b is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='One or both stored analyses were not found.')
+    try:
+        comparison = compare_stored_analyses(analysis_a, analysis_b)
+    except AnalysisComparisonMismatchError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from None
+    except AnalysisNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from None
+    return {'success': True, 'comparison': comparison}
+
+
+@app.get('/api/analyses/{analysis_id}')
+def get_saved_analysis(analysis_id: str) -> dict:
+    """Retrieve a full stored Module 8 result by its public application ID."""
+    repository = _persistence_or_http()
+    try:
+        analysis = repository.get_analysis(analysis_id)
+    except PersistenceValidationError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from None
+    except PersistenceUnavailableError as exc:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail='MongoDB persistence is currently unavailable. Try again later.') from exc
+    if analysis is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Stored analysis not found.')
+    return {'success': True, 'analysis': analysis}
+
+
+@app.get('/api/papers/{paper_id}/analyses')
+def list_saved_paper_analyses(paper_id: str, limit: int = 50) -> dict:
+    """List analysis-history summaries for one saved paper."""
+    repository = _persistence_or_http()
+    try:
+        analyses = repository.list_paper_analyses(paper_id, limit)
+        return {'success': True, 'analyses': analyses}
+    except PersistenceValidationError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from None
+    except PersistenceUnavailableError as exc:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail='MongoDB persistence is currently unavailable. Try again later.') from exc
 
 
 @app.post('/api/evaluation/run')

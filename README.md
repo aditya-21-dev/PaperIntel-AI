@@ -18,6 +18,7 @@ The backend is a FastAPI application in `backend/`; the frontend is a React/Vite
 | 8 | Integrated analysis | Explainable orchestration of Modules 3-7, including evidence, traces, partial results, and cross-module checks. |
 | 9 | System evaluation | Small, maintained deterministic benchmarks with runtime-measured results. |
 | 10 | Production readiness | Configuration, safe errors, structured logging, deployment guidance, and architecture validation. |
+| 11 | Persistence and history | Optional MongoDB storage for safe paper metadata and Module 8 analysis history. |
 
 The publication-specific rules, profiles, and suggested actions are controlled data supplied to generic engines. They are not replacements for the underlying reasoning, CSP, logic, or search algorithms.
 
@@ -63,11 +64,11 @@ Copy `backend/.env.example` and `frontend/.env.example`; never commit the result
 | `ENABLE_API_DOCS` | `true` outside production | Enables `/docs` and `/redoc`; set `false` for public production deployments. |
 | `MAX_UPLOAD_SIZE_MB` | `20` | PDF upload limit, constrained to 1-100 MB. |
 | `FRONTEND_ORIGINS` | local Vite origins | Comma-separated CORS allow-list. |
-| `MONGO_URI` | unset | Optional MongoDB connection string. Do not place credentials in source control. |
-| `DATABASE_NAME` | `paperintel_ai` | Optional MongoDB database name. |
+| `MONGO_URI` | unset | MongoDB connection string used by Module 11 persistence. Do not place credentials in source control. |
+| `DATABASE_NAME` | `paperintel_ai` | MongoDB database name for Module 11 collections. |
 | `VITE_API_BASE_URL` | `http://localhost:8000` | Frontend API base URL. |
 
-When `MONGO_URI` is absent, `GET /health/database` safely returns `503` with `not configured`; no core module depends on MongoDB.
+When `MONGO_URI` is absent, `GET /health/database` safely returns `503` with `not configured`. Core analysis still runs and reports `persistence: NOT_CONFIGURED`; explicit history endpoints return `503` rather than pretending to save data.
 
 ## Key API endpoints
 
@@ -81,6 +82,10 @@ When `MONGO_URI` is absent, `GET /health/database` safely returns `503` with `no
 | `POST /api/planning/search` | Run Module 7 UCS or A* planning. |
 | `POST /api/analysis/run` | Run Module 8 integrated analysis. |
 | `POST /api/evaluation/run` | Run Module 9 benchmarks. |
+| `POST` / `GET /api/papers` | Save or list Module 2 paper metadata; raw PDF bytes are never stored. |
+| `GET /api/papers/{paper_id}` | Retrieve one saved paper metadata record. |
+| `POST /api/analyses` / `GET /api/analyses/{analysis_id}` | Save or retrieve a Module 8 result. |
+| `GET /api/papers/{paper_id}/analyses` | List analysis-history summaries for a paper. |
 
 Every API request returns an `X-Request-ID` header for correlation. Error responses are JSON and never intentionally include stack traces, MongoDB URIs, upload content, or filesystem paths.
 
@@ -97,12 +102,14 @@ npm run build
 
 `frontend/dist/`, `node_modules/`, `.venv/`, bytecode, caches, and `.env` files are ignored by Git. The frontend production bundle can be served as static files by the deployment platform of choice; it is not committed to this repository.
 
+Module 11 unit tests run without MongoDB. The real driver integration test is intentionally skipped unless both `MONGO_TEST_URI` and `MONGO_TEST_DATABASE` are supplied; it creates and drops a uniquely named database derived from that explicit test-only name, never the application database.
+
 ## Deployment checklist
 
 1. Set `APP_ENV=production`, an explicit `FRONTEND_ORIGINS` allow-list, and `ENABLE_API_DOCS=false` unless protected docs are required.
 2. Set a production `VITE_API_BASE_URL` before building the frontend.
 3. Run the backend behind a production ASGI process manager/reverse proxy with TLS termination, request-size controls, and process-level timeouts.
-4. Supply `MONGO_URI` only when a deployed feature genuinely uses persistence; otherwise leave it unset.
+4. Set `MONGO_URI` and `DATABASE_NAME` when persistent paper/analysis history is required. The repository creates only `papers` and `analyses` indexes when persistence is first used.
 5. Monitor the structured JSON-line logs using request IDs. Logs contain method, path, status, duration, and error type—not request bodies, PDFs, or credentials.
 
 ## Known limitations
@@ -111,4 +118,4 @@ npm run build
 - Logical verification is bounded to avoid exponential model and clause growth.
 - Compliance results cover the supported declarative profile requirements only.
 - Improvement plans are hypothetical state-space recommendations. They never edit PDFs, generate prose, or invent citations.
-- The current repository does not persist papers or analysis history to MongoDB.
+- Analysis history requires an available MongoDB server. The application deliberately does not fall back to local files or pretend records were saved.

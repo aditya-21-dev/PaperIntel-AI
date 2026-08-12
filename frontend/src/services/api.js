@@ -98,17 +98,41 @@ export async function runImprovementPlanning({ knowledgeBase, complianceResult, 
   return response.data
 }
 
-export async function runIntegratedAnalysis({ paper, requirements, options }) {
+export async function runIntegratedAnalysis({ paper, requirements, options, paperId }) {
   const response = await api.post('/api/analysis/run', {
     paper,
     ...(requirements ? { requirements } : {}),
     ...(options ? { options } : {}),
+    ...(paperId ? { paper_id: paperId } : {}),
   }, { timeout: 60000 })
+  return response.data
+}
+
+export async function getSavedPapers() {
+  const response = await api.get('/api/papers', { timeout: 30000 })
+  return response.data
+}
+
+export async function getPaperAnalysisHistory(paperId) {
+  const response = await api.get(`/api/papers/${encodeURIComponent(paperId)}/analyses`, { timeout: 30000 })
+  return response.data
+}
+
+export async function getSavedAnalysis(analysisId) {
+  const response = await api.get(`/api/analyses/${encodeURIComponent(analysisId)}`, { timeout: 30000 })
   return response.data
 }
 
 export async function runSystemEvaluation() {
   const response = await api.post('/api/evaluation/run', {}, { timeout: 120000 })
+  return response.data
+}
+
+export async function compareAnalyses(analysisIdA, analysisIdB) {
+  const response = await api.get(
+    `/api/analyses/compare/${encodeURIComponent(analysisIdA)}/${encodeURIComponent(analysisIdB)}`,
+    { timeout: 30000 },
+  )
   return response.data
 }
 
